@@ -48,6 +48,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestExchangeWithBadCode(t *testing.T) {
+	if CLIENT_ID == "" || CLIENT_SECRET == "" {
+		t.Skip()
+	}
 	code := "bogus"
 	conf := &oauth2.Config{
 		RedirectURL:  RedirectURL,
@@ -59,13 +62,18 @@ func TestExchangeWithBadCode(t *testing.T) {
 		},
 	}
 	_, err := conf.Exchange(context.Background(), code)
-	t.Log(err)
-	if strings.Contains(err.Error(), "500 Internal Server Error") {
-		t.Error("500")
+	result := `oauth2: cannot fetch token: 401 Unauthorized
+Response: {"error": "invalid_grant"}`
+
+	if strings.Compare(err.Error(), result) != 0 {
+		t.Error(err)
 	}
 }
 
 func TestPasswordCredentialsToken(t *testing.T) {
+	if CLIENT_ID == "" || CLIENT_SECRET == "" {
+		t.Skip()
+	}
 	conf := &oauth2.Config{
 		RedirectURL:  RedirectURL,
 		ClientID:     CLIENT_ID,
@@ -76,11 +84,53 @@ func TestPasswordCredentialsToken(t *testing.T) {
 		},
 	}
 
-	tok, err := conf.PasswordCredentialsToken(context.Background(), "blah", "blahblah")
-	if strings.Contains(err.Error(), "500 Internal Server Error") {
-		t.Error("Exhange Error")
+	_, err := conf.PasswordCredentialsToken(context.Background(), "blah", "blahblah")
+	result := `oauth2: cannot fetch token: 401 Unauthorized
+Response: {"error_description": "Invalid credentials given.", "error": "invalid_grant"}`
+	altResult := `oauth2: cannot fetch token: 401 Unauthorized
+Response: {"error": "invalid_grant", "error_description": "Invalid credentials given."}`
+
+	if strings.Compare(err.Error(), result) != 0 && strings.Compare(err.Error(), altResult) != 0 {
+		t.Error(err)
 	}
-	t.Log(tok)
+}
+
+func TestRefreshToken(t *testing.T) {
+	if CLIENT_ID == "" || CLIENT_SECRET == "" {
+		t.Skip()
+	}
+	conf := &oauth2.Config{
+		RedirectURL:  RedirectURL,
+		ClientID:     CLIENT_ID,
+		ClientSecret: CLIENT_SECRET,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  bbURL + "/v1/o/authorize/",
+			TokenURL: bbURL + "/v1/o/token/",
+		},
+	}
+	tkn := `{
+	"access_token": "old-bogus",
+	"token_type": "Bearer",
+	"refresh_token": "bogus",
+	"expiry": "2018-01-01T00:00:00-05:00"
+}`
+	tok := &oauth2.Token{}
+	if err := json.Unmarshal([]byte(tkn), tok); err != nil {
+		t.Fatal(err)
+	}
+
+	tknClient := conf.Client(context.Background(), tok)
+
+	_, err := tknClient.Get(bbURL + "/v1/fhir/ExplanationOfBenefit/?patient=20140000008325")
+	//r, _ := httputil.DumpResponse(rsp, true)
+	//log.Println(string(r))
+
+	result := `Get https://sandbox.bluebutton.cms.gov/v1/fhir/ExplanationOfBenefit/?patient=20140000008325: oauth2: cannot fetch token: 401 Unauthorized
+Response: {"error": "invalid_grant"}`
+
+	if strings.Compare(err.Error(), result) != 0 {
+		t.Error(err)
+	}
 }
 
 func BenchmarkEOB(b *testing.B) {
@@ -124,5 +174,6 @@ func BenchmarkEOB(b *testing.B) {
 		b.Log(len(eob))
 		//var out bytes.Buffer
 		//json.Indent(&out, eob, "	", "\t")
+		//fmt.Println(out.String())
 	}
 }
