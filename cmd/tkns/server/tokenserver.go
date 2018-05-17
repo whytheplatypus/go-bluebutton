@@ -35,10 +35,8 @@ func TokenHandler(conf *oauth2.Config, th TokenHandlerFunc) http.Handler {
 
 				return
 			}
-
-			rw.Write([]byte("well done!"))
 			rw.WriteHeader(http.StatusOK)
-
+			rw.Write([]byte("well done!"))
 			return
 		}
 		if err := r.FormValue("error"); err != "" {
@@ -50,8 +48,6 @@ func TokenHandler(conf *oauth2.Config, th TokenHandlerFunc) http.Handler {
 			return
 		}
 		authURL := conf.AuthCodeURL("bobert")
-		//oauth2.SetAuthURLParam("response_type", "token"))
-		log.Println(authURL)
 		http.Redirect(rw, r, authURL, http.StatusSeeOther)
 	})
 }
