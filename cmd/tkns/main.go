@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	RedirectURL   string
+	RedirectURL   string = "http://localhost:8080/"
 	bbURL         string
 	CLIENT_ID     string
 	CLIENT_SECRET string
@@ -44,10 +44,6 @@ func init() {
 		"id",
 		"",
 		"The oauth2 client id for your bluebutton application")
-	flag.StringVar(&RedirectURL,
-		"redirect-url",
-		"http://127.0.0.1:8080/testclient/callback",
-		"The url for your oauth2 callback endpoint")
 	rand.Seed(time.Now().UnixNano())
 }
 
