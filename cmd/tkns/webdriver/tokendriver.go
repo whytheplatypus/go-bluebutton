@@ -2,7 +2,6 @@ package webdriver
 
 import (
 	"log"
-	"net"
 	"strings"
 
 	"github.com/tebeka/selenium"
@@ -66,17 +65,4 @@ func (td *TokenDriver) Approve(username, password string) error {
 		currentURL, err := wd.CurrentURL()
 		return strings.HasPrefix(currentURL, td.RedirectURL), err
 	})
-}
-
-func port() (int, error) {
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
-	if err != nil {
-		return 0, err
-	}
-	l, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
 }

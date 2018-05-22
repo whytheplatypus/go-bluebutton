@@ -1,27 +1,28 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
-	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 
+	"github.com/tebeka/selenium"
+	"github.com/tebeka/selenium/firefox"
+	"github.com/whytheplatypus/errgroup"
 	bluebutton "github.com/whytheplatypus/go-bluebutton"
 	"github.com/whytheplatypus/go-bluebutton/cmd/tkns/server"
 	"github.com/whytheplatypus/go-bluebutton/cmd/tkns/webdriver"
 )
 
 var (
-	RedirectURL   string = "http://localhost:8080/"
+	RedirectURL   string
 	bbURL         string
 	CLIENT_ID     string
 	CLIENT_SECRET string
@@ -29,13 +30,16 @@ var (
 
 const BENE_MIN = 0
 const BENE_MAX = 30000
-const NUM_WORKERS = 4
 
 func init() {
 	flag.StringVar(&bbURL,
 		"url",
 		"http://localhost:8000",
 		"The URL of the bluebutton API")
+	flag.StringVar(&RedirectURL,
+		"redirect-uri",
+		"http://localhost:8080/",
+		"The URI for the redirect to the local server")
 	flag.StringVar(&CLIENT_SECRET,
 		"secret",
 		"",
@@ -50,15 +54,31 @@ func init() {
 func main() {
 	var verbose bool
 	var tknCount int
+	var numWorkers int
+	var driverStartPort int
 	flag.BoolVar(&verbose, "v", false, "Enable for verbose logging")
 	flag.IntVar(&tknCount, "n", 1, "The number of tokens to generate")
+	flag.IntVar(&numWorkers, "w", 1, "The number of workers to use")
+	flag.IntVar(&driverStartPort, "p", 4444, "The start port for geckodriver, starting with this port a port will be assigned to each worker process")
 	flag.Parse()
 	if verbose {
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
+		log.SetOutput(os.Stderr)
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
 
+	// Time how long this takes
+	// -------------------------
+	start := time.Now()
+
+	defer func() {
+		elapsed := time.Since(start)
+		log.Printf("Generated %d tokens in %s \n", tknCount, elapsed)
+	}()
+
+	// Spinup webserver to fetch tokens
+	// ---------------------------------
 	bluebutton.BB_URL = bbURL
 	conf := &oauth2.Config{
 		RedirectURL:  RedirectURL,
@@ -69,61 +89,67 @@ func main() {
 			TokenURL: bluebutton.TokenURL(),
 		},
 	}
+	handler := server.TokenHandler(conf, server.WriteTkn(os.Stdout))
+	go func(handler http.Handler) {
+		url, err := url.Parse(RedirectURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := http.ListenAndServe(fmt.Sprintf(":%s", url.Port()), handler); err != nil {
+			log.Fatal(err)
+		}
+	}(handler)
 
-	tknChan := make(chan Token)
-	defer close(tknChan)
+	// Spin up token generation jobs
+	// ------------------------------
+	jobs := generateCredentials(tknCount)
 
-	// Fans out
-	go http.ListenAndServe(":8080", server.TokenHandler(conf, func(tkn *oauth2.Token) error {
-		tknChan <- Token{*tkn}
-		return nil
-	}))
-	// Funnel in
-	go WriteTkn(os.Stdout, tknChan)
+	var g errgroup.Group
+	for i := 0; i < numWorkers; i++ {
+		s, wd := buildWebServiceAndDriver(driverStartPort + i)
+		defer s.Stop()
+		defer wd.Close()
+		tf := &webdriver.TokenFetcher{
+			Jobs:        jobs,
+			WD:          wd,
+			RedirectURL: RedirectURL,
+		}
+		g.Go(tf.Work)
+	}
 
+	if err := g.Wait(); err != nil {
+		log.Println("[ERROR]", err)
+		os.Exit(1)
+	}
+}
+
+func generateCredentials(tknCount int) chan [2]string {
+	jobs := make(chan [2]string, tknCount)
+	defer close(jobs)
 	generator := &RandomCred{}
-
-	creds := make(chan struct{})
-	// worker pool
-	wg := &sync.WaitGroup{}
-	wg.Add(NUM_WORKERS)
-	for i := 0; i < NUM_WORKERS; i++ {
-		go func(creds <-chan struct{}) {
-			defer wg.Done()
-			for range creds {
-				if err := webdriver.FetchToken(generator, RedirectURL); err != nil {
-					log.Fatal(err)
-				}
-			}
-		}(creds)
-	}
-
 	for i := 0; i < tknCount; i++ {
-		creds <- struct{}{}
+		u, p := generator.GetCreds()
+		jobs <- [2]string{u, p}
 	}
-	close(creds)
-	wg.Wait()
+	return jobs
 }
 
-func WriteTkn(w io.Writer, tknChan <-chan Token) {
-	for tkn := range tknChan {
-		fmt.Fprintln(w, &tkn)
-	}
-}
-
-type Token struct {
-	oauth2.Token
-}
-
-func (tok *Token) String() string {
-	//stok, err := json.MarshalIndent(tok, "", "	")
-	stok, err := json.Marshal(tok)
+func buildWebServiceAndDriver(portNum int) (*selenium.Service, selenium.WebDriver) {
+	var opts []selenium.ServiceOption
+	s, err := selenium.NewGeckoDriverService("geckodriver", portNum, opts...)
 	if err != nil {
-		log.Println(err)
-		return ""
+		log.Fatal(err)
 	}
-
-	return string(stok)
+	// Connect to the WebDriver instance running locally.
+	caps := selenium.Capabilities{"browserName": "firefox"}
+	caps.AddFirefox(firefox.Capabilities{
+		Args: []string{"-headless"},
+	})
+	wd, err := selenium.NewRemote(caps, fmt.Sprintf("http://localhost:%d", portNum))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return s, wd
 }
 
 type RandomCred struct{}
