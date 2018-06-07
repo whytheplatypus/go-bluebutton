@@ -21,7 +21,11 @@ func (tf *TokenFetcher) Work() error {
 		log.Printf("[DEBUG] %s working on %v+ \n",
 			tf.WD.SessionID(),
 			job)
-		td.Approve(job[0], job[1])
+		err := td.Approve(job[0], job[1])
+		if err != nil {
+			tf.WD.Close()
+			return err
+		}
 	}
 	return nil
 }

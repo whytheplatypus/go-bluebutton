@@ -52,10 +52,11 @@ func init() {
 }
 
 func main() {
-	var verbose bool
+	var verbose, random bool
 	var tknCount int
 	var numWorkers int
 	var driverStartPort int
+	flag.BoolVar(&random, "random", false, "Should we generate random beneficiary credentials?")
 	flag.BoolVar(&verbose, "v", false, "Enable for verbose logging")
 	flag.IntVar(&tknCount, "n", 1, "The number of tokens to generate")
 	flag.IntVar(&numWorkers, "w", 1, "The number of workers to use")
@@ -102,7 +103,7 @@ func main() {
 
 	// Spin up token generation jobs
 	// ------------------------------
-	jobs := generateCredentials(tknCount)
+	jobs := generateCredentials(tknCount, random)
 
 	var g errgroup.Group
 	for i := 0; i < numWorkers; i++ {
@@ -123,10 +124,17 @@ func main() {
 	}
 }
 
-func generateCredentials(tknCount int) chan [2]string {
+func generateCredentials(tknCount int, random bool) chan [2]string {
 	jobs := make(chan [2]string, tknCount)
 	defer close(jobs)
-	generator := &RandomCred{}
+
+	var generator Cred
+	if random == true {
+		generator = &RandomCred{}
+	} else {
+		generator = &SerialCred{}
+	}
+
 	for i := 0; i < tknCount; i++ {
 		u, p := generator.GetCreds()
 		jobs <- [2]string{u, p}
@@ -150,6 +158,21 @@ func buildWebServiceAndDriver(portNum int) (*selenium.Service, selenium.WebDrive
 		log.Fatal(err)
 	}
 	return s, wd
+}
+
+type Cred interface {
+	GetCreds() (username, password string)
+}
+
+type SerialCred struct {
+	Idx int
+}
+
+func (sc *SerialCred) GetCreds() (username, password string) {
+	username = fmt.Sprintf("User%05d", sc.Idx)
+	password = fmt.Sprintf("PW%05d!", sc.Idx)
+	sc.Idx++
+	return
 }
 
 type RandomCred struct{}
