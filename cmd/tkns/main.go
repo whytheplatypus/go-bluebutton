@@ -127,8 +127,12 @@ func main() {
 func generateCredentials(tknCount int, random bool) chan [2]string {
 	jobs := make(chan [2]string, tknCount)
 	defer close(jobs)
-	generator := &Cred{
-		Random: random,
+
+	var generator Cred
+	if random == true {
+		generator = &RandomCred{}
+	} else {
+		generator = &SerialCred{}
 	}
 
 	for i := 0; i < tknCount; i++ {
@@ -156,20 +160,26 @@ func buildWebServiceAndDriver(portNum int) (*selenium.Service, selenium.WebDrive
 	return s, wd
 }
 
-type Cred struct {
-	Idx    int
-	Random bool
+type Cred interface {
+	GetCreds() (username, password string)
 }
 
-func (c *Cred) GetCreds() (username, password string) {
-	if c.Random {
-		u := rand.Intn(BENE_MAX)
-		username = fmt.Sprintf("User%05d", u)
-		password = fmt.Sprintf("PW%05d!", u)
-	} else {
-		username = fmt.Sprintf("User%05d", c.Idx)
-		password = fmt.Sprintf("PW%05d!", c.Idx)
-		c.Idx++
-	}
+type SerialCred struct {
+	Idx int
+}
+
+func (sc *SerialCred) GetCreds() (username, password string) {
+	username = fmt.Sprintf("User%05d", sc.Idx)
+	password = fmt.Sprintf("PW%05d!", sc.Idx)
+	sc.Idx++
+	return
+}
+
+type RandomCred struct{}
+
+func (rc *RandomCred) GetCreds() (username, password string) {
+	u := rand.Intn(BENE_MAX)
+	username = fmt.Sprintf("BBUser%05d", u)
+	password = fmt.Sprintf("PW%05d!", u)
 	return
 }
