@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -51,16 +52,36 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+type CookiesVar []*selenium.Cookie
+
+func (av *CookiesVar) String() string {
+	return ""
+}
+
+func (av *CookiesVar) Set(s string) error {
+	parts := strings.SplitN(s, "=", 2)
+	c := &selenium.Cookie{
+		Name:  parts[0],
+		Value: parts[1],
+	}
+	*av = append(*av, c)
+	return nil
+}
+
 func main() {
 	var verbose, random bool
 	var tknCount int
 	var numWorkers int
 	var driverStartPort int
+	var cookies CookiesVar
 	flag.BoolVar(&random, "random", false, "Should we generate random beneficiary credentials?")
 	flag.BoolVar(&verbose, "v", false, "Enable for verbose logging")
 	flag.IntVar(&tknCount, "n", 1, "The number of tokens to generate")
 	flag.IntVar(&numWorkers, "w", 1, "The number of workers to use")
 	flag.IntVar(&driverStartPort, "p", 4444, "The start port for geckodriver, starting with this port a port will be assigned to each worker process")
+
+	flag.Var(&cookies, "cookie", "Specify a cookie to set on the selenium driver, multiple cookies can be set in the form of -cookie key=value")
+
 	flag.Parse()
 	if verbose {
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
@@ -110,6 +131,9 @@ func main() {
 		s, wd := buildWebServiceAndDriver(driverStartPort + i)
 		defer s.Stop()
 		defer wd.Close()
+		for _, cookie := range cookies {
+			wd.AddCookie(cookie)
+		}
 		tf := &webdriver.TokenFetcher{
 			Jobs:        jobs,
 			WD:          wd,
