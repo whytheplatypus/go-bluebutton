@@ -51,16 +51,29 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+type StringsVar []string
+
+func (sv *StringsVar) String() string {
+	return ""
+}
+
+func (sv *StringsVar) Set(s string) error {
+	*sv = append(*sv, s)
+	return nil
+}
+
 func main() {
 	var verbose, random bool
 	var tknCount int
 	var numWorkers int
 	var driverStartPort int
+	var prepURLs StringsVar
 	flag.BoolVar(&random, "random", false, "Should we generate random beneficiary credentials?")
 	flag.BoolVar(&verbose, "v", false, "Enable for verbose logging")
 	flag.IntVar(&tknCount, "n", 1, "The number of tokens to generate")
 	flag.IntVar(&numWorkers, "w", 1, "The number of workers to use")
 	flag.IntVar(&driverStartPort, "p", 4444, "The start port for geckodriver, starting with this port a port will be assigned to each worker process")
+	flag.Var(&prepURLs, "prep-url", "Specify a url to be retrieved before running the main process, can be specified multiple times")
 	flag.Parse()
 	if verbose {
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
@@ -110,6 +123,9 @@ func main() {
 		s, wd := buildWebServiceAndDriver(driverStartPort + i)
 		defer s.Stop()
 		defer wd.Close()
+		for _, url := range prepURLs {
+			wd.Get(url)
+		}
 		tf := &webdriver.TokenFetcher{
 			Jobs:        jobs,
 			WD:          wd,
